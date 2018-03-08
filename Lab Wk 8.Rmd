@@ -56,4 +56,42 @@ leaflet(oil_sf) %>%
 ```
 
 
+##tmap plot with Texas state shapefile
+
+```{r}
+states <- st_read(dsn = ".", layer = "states")
+#can now treat this info liek a data fram and will keep geometry as polygons etc
+
+tex_border <- states %>% 
+  filter(STATE_NAME == "Texas") %>%  #filter by column where state name matches texas
+  st_transform(4326) #change the crs number for epsg value (matches oil spill points that we have)
+
+plot(tex_border)
+#plots all 5 non geometry column
+
+#but we want to plot the state with points on top of top of it
+
+tm_shape(tex_border) +
+  tm_polygons()+
+  tm_shape(oil_sf)+
+  tm_dots(size = 0.3)
+  
+  #then want to ask, does this point pattern follow poisson distribution? is it randomly spatially distributed?
+```
+
+###Convert the data to spatial points patterns (combination of point data and the bounding window -- used to evaluate the points within it)
+
+```{r}
+
+spill_sp <- as(oil_sf, "Spatial") #convert oil_sf back to spatial data frame
+spill_ppp <- as(spill_sp, "ppp") #convert new df to point pattern
+
+
+tx_sp <- as(tex_border, "Spatial")
+tx_owin <- as(tx_sp, "owin") #make this border the outer window for ppp
+
+all_ppp <- ppp(spill_ppp$x, spill_ppp$y, window = tx_owin) #corresponding long and lats, also window
+#4 points are rejected b/c they are outside the boundaries of the state
+
+```
 
