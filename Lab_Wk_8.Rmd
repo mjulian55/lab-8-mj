@@ -1,0 +1,148 @@
+---
+title: "Lab Wk 8"
+author: "Maddie Julian"
+date: "3/8/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###Load Packages
+```{r}
+library(tidyverse)
+library(sf)
+library(tmap)
+library(leaflet)
+library(spatstat)
+library(maptools)
+library(corrplot)
+```
+
+###Column graph of Texas oil spills
+
+```{r}
+oil_spills <- read_csv("oil_spills.csv")
+
+df<- oil_spills %>% 
+  filter(`Accident State` == "TX" & `Accident Year`<2017) %>% 
+  group_by(`Accident Year`) %>% 
+  summarise(Loss = sum(`Net Loss (Barrels)`))#apply one or more functions to a data set; creating new value called Loss
+#View(df)
+
+colnames(df) <- c("Year", "Loss")
+
+ggplot(df, aes(x=Year, y=Loss)) +
+  geom_col()
+```
+
+
+###Leaflet plot of spill locations in TX in 2016
+
+```{r}
+df_loc <- oil_spills %>% 
+  filter(`Accident State`=="TX" & `Accident Year`=="2016") %>% 
+  select(Latitude, Longitude, `Net Loss (Barrels)`)
+
+colnames(df_loc)<- c("latitude", "longitude", "net_loss")
+
+oil_sf <- st_as_sf(df_loc, coords= c("longitude", "latitude"), crs = 4326) #convert current df info into simple feature spatial data
+
+leaflet(oil_sf) %>% 
+  addTiles() %>%  #base graph
+  addMarkers()
+
+```
+
+
+##tmap plot with Texas state shapefile
+
+```{r}
+states <- st_read(dsn = ".", layer = "states")
+#can now treat this info liek a data fram and will keep geometry as polygons etc
+
+tex_border <- states %>% 
+  filter(STATE_NAME == "Texas") %>%  #filter by column where state name matches texas
+  st_transform(4326) #change the crs number for epsg value (matches oil spill points that we have)
+
+plot(tex_border)
+#plots all 5 non geometry column
+
+#but we want to plot the state with points on top of top of it
+
+tm_shape(tex_border) +
+  tm_polygons()+
+  tm_shape(oil_sf)+
+  tm_dots(size = 0.3)
+  
+  #then want to ask, does this point pattern follow poisson distribution? is it randomly spatially distributed?
+```
+
+###Convert the data to spatial points patterns (combination of point data and the bounding window -- used to evaluate the points within it)
+
+```{r}
+
+spill_sp <- as(oil_sf, "Spatial") #convert oil_sf back to spatial data frame
+spill_ppp <- as(spill_sp, "ppp") #convert new df to point pattern
+
+
+tx_sp <- as(tex_border, "Spatial")
+tx_owin <- as(tx_sp, "owin") #make this border the outer window for ppp
+
+all_ppp <- ppp(spill_ppp$x, spill_ppp$y, window = tx_owin) #corresponding long and lats, also window
+#4 points are rejected b/c they are outside the boundaries of the state
+
+```
+
+###A density plot:
+```{r}
+plot(density(all_ppp, sigma = 0.4)) #sigma means radius of the bubbles
+```
+
+###Quadrat test for spatial evenness
+
+```{r}
+oil_qt <- quadrat.test(all_ppp, nx = 5, ny = 5) #horizontally want there to be a total of 5 regions, and 5 vertically(breaks up whole state of texas into 5 regions in each direction)
+oil_qt
+
+#testing a null hypothesis of csr - randomness
+#b/c of outcome, you would reject null; say that data is not spatially evenly distributed -- see sig p value
+
+plot(all_ppp)
+plot(oil_qt, add = TRUE, cex = 0.4)
+
+#numbers in boxes
+#upper right = expected
+#upper left = actual
+#sd measure of how different from the expected
+```
+
+###G-Function for Nearest Neighbor Analysis
+
+```{r}
+r <- seq(0, 1, by = 0.01) #lag
+
+oil_gfun <- envelope(all_ppp, fun = Gest, r = r, nsim = 100) #nsim means run 100 simulations
+
+#THEO: THEORETICAL VALUES BASED ON SIMULATIONS
+
+ggplot(oil_gfun, aes(x = r, y = obs))+
+  geom_line(color = "black")+
+  geom_line(aes(x = r, y = theo), color = "red")
+#our obs data has a higher proportion of point pairs with nearest neighbors at shorter distances compared to csr data
+#*on average our data has nearest neighbor thats closer than we would expect with csr
+```
+
+#Nearest neighbor using the L-fucnction (Ripley's K function but standardized)
+
+```{r}
+r2 <- seq(0,3, by = 0.5)
+
+oil_lfun <- envelope(all_ppp, fun = Lest, r = r2, nsim = 20, global = TRUE) #looks at every point and makes increasing bubbles around it until it include every point that exists; so we do 20 simulations b/c it takes a long time
+
+ggplot(oil_lfun, aes(x = r2, y = obs))+
+  geom_line(color = "black")+
+  geom_line(aes(x = r2, y = theo, color = "red"))
+```
+
